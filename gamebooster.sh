@@ -4,19 +4,40 @@
 #   Termux menu tool (Shizuku-aware) + Auto Update
 # =========================================
 
+# Script version
+VERSION="1.0.0"
+REPO_URL="https://github.com/yourusername/yourrepository.git"
+
 # -------- Auto Update --------
 auto_update() {
   echo ">>> Checking for updates..."
-  if [ -d .git ]; then
-    git pull origin main >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
-      echo ">>> Tool updated to latest version."
+  
+  # If not a git repository, try to clone it
+  if [ ! -d .git ]; then
+    echo ">>> Not a git repository, checking if can update via git..."
+    return 1
+  fi
+  
+  # Check if we can connect to the repository
+  if git fetch origin main >/dev/null 2>&1; then
+    LOCAL_HASH=$(git rev-parse HEAD)
+    REMOTE_HASH=$(git rev-parse origin/main)
+    
+    if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
+      echo ">>> Update found! Downloading..."
+      if git pull --rebase origin main >/dev/null 2>&1; then
+        echo ">>> Tool updated to latest version. Please restart the script."
+        exit 0
+      else
+        echo ">>> Update failed. Continuing with current version."
+      fi
     else
-      echo ">>> Could not check updates (maybe no internet)."
+      echo ">>> You have the latest version."
     fi
   else
-    echo ">>> Not a git repository, skipping auto-update."
+    echo ">>> Could not check updates (maybe no internet)."
   fi
+  
   sleep 2
 }
 
@@ -38,7 +59,7 @@ mkdir -p "$STATE_DIR"
 ANIM_BAK="$STATE_DIR/anim_scales.bak"
 SYNC_BAK="$STATE_DIR/sync_state.bak"
 
-banner () {
+banner() {
   clear
   echo -e "${c1}"
   echo "  ███████ ███████ ██      █████  ███    ███     ██████   █████  ██████   █████  ███    ██ "
@@ -48,32 +69,38 @@ banner () {
   echo "  ███████ ███████ ██████ ██   ██ ██      ██     ██   ██ ██   ██ ██████  ██   ██ ██   ████ "
   echo -e "${c0}"
   echo -e "             ${c3}Android Game Booster by Eslam Ramadan${c0}"
+  echo -e "             ${c2}Version: $VERSION${c0}"
+  if $has_rish; then
+    echo -e "             ${c2}Shizuku detected: YES${c0}"
+  else
+    echo -e "             ${c4}Shizuku detected: NO${c0}"
+  fi
   echo
 }
 
 msg() { echo -e "$1$2${c0}"; }
-pause() { read -p $'\nPress Enter to return to menu...'; }
+pause() { echo ""; read -p "Press Enter to return to menu..."; }
 
 # -------- Basics (no root) --------
-install_essentials () {
+install_essentials() {
   msg "$c3" ">>> Installing Termux Essentials..."
   pkg update -y && pkg upgrade -y
   pkg install -y git curl wget nano python python-pip termux-api
   msg "$c2" ">>> Essentials installed successfully."
 }
 
-light_clean_termux () {
+light_clean_termux() {
   msg "$c3" ">>> Cleaning Termux own caches/logs..."
-  rm -rf "$HOME"/.cache/* 2>/dev/null
+  rm -rf "$HOME/.cache/*" 2>/dev/null
   find "$PREFIX/var/cache" -type f -delete 2>/dev/null
   find "$PREFIX/tmp" -mindepth 1 -delete 2>/dev/null
   msg "$c2" ">>> Termux cache cleaned."
 }
 
-focus_termux_only () {
+focus_termux_only() {
   msg "$c3" ">>> Minimizing Termux overhead for focus session..."
   if command -v sv >/dev/null 2>&1; then
-    for s in "$PREFIX"/var/service/*; do [ -d "$s" ] && sv down "$s" 2>/dev/null; done
+    for s in "$PREFIX/var/service/"*; do [ -d "$s" ] && sv down "$s" 2>/dev/null; done
   fi
   export PYTHONOPTIMIZE=2
   msg "$c2" ">>> Lightweight session variables applied."
@@ -88,7 +115,7 @@ SHELL_RUN() {
   fi
 }
 
-backup_anim_scales () {
+backup_anim_scales() {
   if [ ! -f "$ANIM_BAK" ]; then
     local w a t
     w=$(SHELL_RUN settings get global window_animation_scale 2>/dev/null)
@@ -98,7 +125,7 @@ backup_anim_scales () {
   fi
 }
 
-set_anim_scales () {
+set_anim_scales() {
   local val="$1"
   backup_anim_scales
   SHELL_RUN settings put global window_animation_scale "$val"
@@ -106,7 +133,7 @@ set_anim_scales () {
   SHELL_RUN settings put global transition_animation_scale "$val"
 }
 
-restore_anim_scales () {
+restore_anim_scales() {
   if [ -f "$ANIM_BAK" ]; then
     IFS='|' read -r w a t < "$ANIM_BAK"
     SHELL_RUN settings put global window_animation_scale "${w:-1.0}"
@@ -116,20 +143,20 @@ restore_anim_scales () {
   fi
 }
 
-backup_sync () {
+backup_sync() {
   if [ ! -f "$SYNC_BAK" ]; then
     s=$(SHELL_RUN settings get global master_sync 2>/dev/null)
     echo "${s:-1}" > "$SYNC_BAK"
   fi
 }
 
-set_master_sync () {
+set_master_sync() {
   local v="$1"
   backup_sync
   SHELL_RUN settings put global master_sync "$v"
 }
 
-restore_sync () {
+restore_sync() {
   if [ -f "$SYNC_BAK" ]; then
     v=$(cat "$SYNC_BAK")
     SHELL_RUN settings put global master_sync "${v:-1}"
@@ -137,22 +164,26 @@ restore_sync () {
   fi
 }
 
-kill_background_apps () {
+kill_background_apps() {
   msg "$c3" ">>> Killing background apps..."
-  SHELL_RUN am kill-all 2>/dev/null && msg "$c2" ">>> Done." || msg "$c4" ">>> Failed."
+  if SHELL_RUN am kill-all 2>/dev/null; then
+    msg "$c2" ">>> Done."
+  else
+    msg "$c4" ">>> Failed."
+  fi
 }
 
-force_stop_package () {
+force_stop_package() {
   read -rp "Enter package name: " P
   [ -n "$P" ] && SHELL_RUN am force-stop "$P"
 }
 
-compile_speed_package () {
+compile_speed_package() {
   read -rp "Enter package: " P
   [ -n "$P" ] && SHELL_RUN cmd package compile -m speed -f "$P"
 }
 
-game_mode_on () {
+game_mode_on() {
   msg "$c3" ">>> Game Mode ON..."
   if $has_rish; then
     set_anim_scales 0.0
@@ -160,18 +191,42 @@ game_mode_on () {
     kill_background_apps
     msg "$c2" ">>> Game Mode Activated."
   else
-    msg "$c4" ">>> Shizuku not available."
+    msg "$c4" ">>> Shizuku not available. Please install Shizuku and rish for full functionality."
   fi
 }
 
-game_mode_off () {
+game_mode_off() {
   msg "$c3" ">>> Restoring system..."
   restore_anim_scales
   restore_sync
   msg "$c2" ">>> Restored."
 }
 
-menu () {
+# New function to install the tool
+install_tool() {
+  msg "$c3" ">>> Installing Android Game Booster..."
+  
+  if [ -d "$HOME/android-game-booster" ]; then
+    msg "$c4" ">>> Tool already installed. Updating instead..."
+    cd "$HOME/android-game-booster"
+    git pull origin main
+  else
+    cd "$HOME"
+    if git clone "$REPO_URL" android-game-booster; then
+      msg "$c2" ">>> Tool downloaded successfully."
+      cd android-game-booster
+      chmod +x *.sh
+    else
+      msg "$c4" ">>> Failed to download tool. Check your internet connection."
+      return 1
+    fi
+  fi
+  
+  msg "$c2" ">>> Installation complete. You can run the tool with:"
+  msg "$c2" ">>> cd ~/android-game-booster && ./game_booster.sh"
+}
+
+menu() {
   banner
   echo -e "${c2}[1]${c0} Install Termux Essentials"
   echo -e "${c2}[2]${c0} Light Clean Termux"
@@ -181,6 +236,7 @@ menu () {
   echo -e "${c2}[6]${c0} Kill Background Apps"
   echo -e "${c2}[7]${c0} Force Stop Package"
   echo -e "${c2}[8]${c0} Compile Package for Speed"
+  echo -e "${c2}[9]${c0} Install/Update This Tool"
   echo -e "${c2}[0]${c0} Exit"
   echo
   read -rp "Choose option: " ch
@@ -193,6 +249,7 @@ menu () {
     6) kill_background_apps; pause ;;
     7) force_stop_package; pause ;;
     8) compile_speed_package; pause ;;
+    9) install_tool; pause ;;
     0) exit 0 ;;
     *) msg "$c4" "Invalid choice."; pause ;;
   esac
