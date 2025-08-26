@@ -4,38 +4,38 @@
 #   Termux menu tool (Shizuku-aware) + Auto Update
 # =========================================
 
-# Script version
+# Script version and repository info
 VERSION="1.0.0"
-REPO_URL="https://github.com/yourusername/yourrepository.git"
+REPO_URL="https://github.com/EslamRamadan0/Android-Game-Booster.git"
+SCRIPT_NAME="game_booster.sh"
 
 # -------- Auto Update --------
 auto_update() {
   echo ">>> Checking for updates..."
   
-  # If not a git repository, try to clone it
-  if [ ! -d .git ]; then
-    echo ">>> Not a git repository, checking if can update via git..."
-    return 1
-  fi
-  
-  # Check if we can connect to the repository
-  if git fetch origin main >/dev/null 2>&1; then
-    LOCAL_HASH=$(git rev-parse HEAD)
-    REMOTE_HASH=$(git rev-parse origin/main)
-    
-    if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
-      echo ">>> Update found! Downloading..."
-      if git pull --rebase origin main >/dev/null 2>&1; then
-        echo ">>> Tool updated to latest version. Please restart the script."
-        exit 0
+  # Check if we're in a git repository
+  if [ -d .git ] && command -v git >/dev/null 2>&1; then
+    # Check connectivity to remote repository
+    if git fetch origin main >/dev/null 2>&1; then
+      LOCAL_HASH=$(git rev-parse HEAD)
+      REMOTE_HASH=$(git rev-parse origin/main)
+      
+      if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
+        echo ">>> Update found! Downloading..."
+        if git pull --rebase origin main >/dev/null 2>&1; then
+          echo ">>> Tool updated to latest version. Please restart the script."
+          exit 0
+        else
+          echo ">>> Update failed. Continuing with current version."
+        fi
       else
-        echo ">>> Update failed. Continuing with current version."
+        echo ">>> You have the latest version."
       fi
     else
-      echo ">>> You have the latest version."
+      echo ">>> Could not check updates (no internet or repository access)."
     fi
   else
-    echo ">>> Could not check updates (maybe no internet)."
+    echo ">>> Not a git repository, skipping auto-update."
   fi
   
   sleep 2
@@ -91,7 +91,7 @@ install_essentials() {
 
 light_clean_termux() {
   msg "$c3" ">>> Cleaning Termux own caches/logs..."
-  rm -rf "$HOME/.cache/*" 2>/dev/null
+  rm -rf "$HOME"/.cache/* 2>/dev/null
   find "$PREFIX/var/cache" -type f -delete 2>/dev/null
   find "$PREFIX/tmp" -mindepth 1 -delete 2>/dev/null
   msg "$c2" ">>> Termux cache cleaned."
@@ -100,7 +100,7 @@ light_clean_termux() {
 focus_termux_only() {
   msg "$c3" ">>> Minimizing Termux overhead for focus session..."
   if command -v sv >/dev/null 2>&1; then
-    for s in "$PREFIX/var/service/"*; do [ -d "$s" ] && sv down "$s" 2>/dev/null; done
+    for s in "$PREFIX"/var/service/*; do [ -d "$s" ] && sv down "$s" 2>/dev/null; done
   fi
   export PYTHONOPTIMIZE=2
   msg "$c2" ">>> Lightweight session variables applied."
@@ -202,20 +202,32 @@ game_mode_off() {
   msg "$c2" ">>> Restored."
 }
 
-# New function to install the tool
+# New function to install the tool from GitHub
 install_tool() {
-  msg "$c3" ">>> Installing Android Game Booster..."
+  msg "$c3" ">>> Installing/Updating Android Game Booster..."
   
-  if [ -d "$HOME/android-game-booster" ]; then
-    msg "$c4" ">>> Tool already installed. Updating instead..."
-    cd "$HOME/android-game-booster"
-    git pull origin main
+  # Check if git is available
+  if ! command -v git >/dev/null 2>&1; then
+    msg "$c4" ">>> Git is not installed. Installing now..."
+    pkg update -y && pkg install -y git
+  fi
+  
+  # Clone or update the repository
+  if [ -d "$HOME/Android-Game-Booster" ]; then
+    msg "$c3" ">>> Tool already installed. Updating..."
+    cd "$HOME/Android-Game-Booster"
+    if git pull origin main; then
+      chmod +x "$SCRIPT_NAME"
+      msg "$c2" ">>> Update successful."
+    else
+      msg "$c4" ">>> Update failed."
+    fi
   else
     cd "$HOME"
-    if git clone "$REPO_URL" android-game-booster; then
+    if git clone "$REPO_URL"; then
       msg "$c2" ">>> Tool downloaded successfully."
-      cd android-game-booster
-      chmod +x *.sh
+      cd "Android-Game-Booster"
+      chmod +x "$SCRIPT_NAME"
     else
       msg "$c4" ">>> Failed to download tool. Check your internet connection."
       return 1
@@ -223,7 +235,21 @@ install_tool() {
   fi
   
   msg "$c2" ">>> Installation complete. You can run the tool with:"
-  msg "$c2" ">>> cd ~/android-game-booster && ./game_booster.sh"
+  msg "$c2" ">>> cd ~/Android-Game-Booster && ./$SCRIPT_NAME"
+}
+
+show_help() {
+  echo -e "${c1}Android Game Booster - Help${c0}"
+  echo
+  echo "This tool helps optimize your Android device for gaming through Termux."
+  echo
+  echo "For full functionality, you need:"
+  echo "1. Shizuku installed and running on your device"
+  echo "2. Rish installed in Termux: pkg install shizuku"
+  echo
+  echo "Without Shizuku, some features will not work."
+  echo
+  read -p "Press Enter to continue..."
 }
 
 menu() {
@@ -237,6 +263,7 @@ menu() {
   echo -e "${c2}[7]${c0} Force Stop Package"
   echo -e "${c2}[8]${c0} Compile Package for Speed"
   echo -e "${c2}[9]${c0} Install/Update This Tool"
+  echo -e "${c2}[H]${c0} Help"
   echo -e "${c2}[0]${c0} Exit"
   echo
   read -rp "Choose option: " ch
@@ -250,9 +277,13 @@ menu() {
     7) force_stop_package; pause ;;
     8) compile_speed_package; pause ;;
     9) install_tool; pause ;;
+    h|H) show_help; ;;
     0) exit 0 ;;
     *) msg "$c4" "Invalid choice."; pause ;;
   esac
 }
 
-while true; do menu; done
+# Main execution
+while true; do
+  menu
+done
